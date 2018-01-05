@@ -10,7 +10,7 @@ libmodpython_la_LDFLAGS = -export-all-symbols
 else
 pkglib_LTLIBRARIES    = modpython.la
 modpython_la_SOURCES = mod_python.c 
-modpython_la_LDFLAGS = -module -avoid-version -lpython@PYTHON_VERSION@
+modpython_la_LDFLAGS = -module -avoid-version @PYTHON_LIBS@
 
 EXTRA_DIST = README.in ../conf.d/modpython.conf.in
 endif 

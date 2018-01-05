@@ -120,6 +120,7 @@ get_python_string_value(PyObject* dv, char* bfr, int len)
         long v = PyLong_AsLong(dv);
         snprintf(bfr, len, "%ld", v);
     }
+#if PY_MAJOR_VERSION < 3
     else if (PyInt_Check(dv)) {
         long v = PyInt_AsLong(dv);
         snprintf(bfr, len, "%ld", v);
@@ -128,6 +129,12 @@ get_python_string_value(PyObject* dv, char* bfr, int len)
         char* v = PyString_AsString(dv);
         snprintf(bfr, len, "%s", v);
     }
+#else
+    else if (PyUnicode_Check(dv)) {
+        char* v = PyUnicode_AsUTF8(dv);
+        snprintf(bfr, len, "%s", v);
+    }
+#endif
     else if (PyFloat_Check(dv)) {
         double v = PyFloat_AsDouble(dv);
         snprintf(bfr, len, "%f", v);
@@ -166,6 +173,23 @@ int
 get_python_uint_value(PyObject* dv, unsigned int* pint)
 {
     int cc = 1;
+#if PY_MAJOR_VERSION >= 3
+    if (PyLong_Check(dv)) {
+        unsigned long v = PyLong_AsUnsignedLongMask(dv);
+        *pint = (unsigned int)v;
+    }
+    else if (PyUnicode_Check(dv)) {
+        /* Convert from string to int */
+        unsigned long tid;
+        char *endptr;
+        char* p = PyUnicode_AsUTF8(dv);
+        tid = strtoul(p, &endptr, 10);
+        if(endptr == p || *endptr)
+            cc = -1;    /* Invalid numeric format */
+        else
+            *pint = (unsigned int)tid;
+    }
+#else
     if (PyInt_Check(dv) || PyLong_Check(dv)) {
         unsigned long v = PyInt_AsUnsignedLongMask(dv);
         *pint = (unsigned int)v;
@@ -181,6 +205,7 @@ get_python_uint_value(PyObject* dv, unsigned int* pint)
         else
             *pint = (unsigned int)tid;
     }
+#endif
     else {
         cc = -1;    /* Don't know how to convert this */
     }
@@ -195,15 +220,23 @@ get_python_int_value(PyObject* dv, int* pint)
         long v = PyLong_AsLong(dv);
         *pint = (int)v;
     }
+#if PY_MAJOR_VERSION < 3
     else if (PyInt_Check(dv)) {
         long v = PyInt_AsLong(dv);
         *pint = (int)v;
     }
     else if (PyString_Check(dv)) {
+#else
+    else if (PyUnicode_Check(dv)) {
+#endif
         /* Convert from string to int */
         long tid;
         char *endptr;
+#if PY_MAJOR_VERSION < 3
         char* p = PyString_AsString(dv);
+#else
+        char* p = PyUnicode_AsUTF8(dv);
+#endif
         tid = strtol(p, &endptr, 10);
         if(endptr == p || *endptr)
             cc = -1;    /* Invalid numeric format */
@@ -247,15 +280,23 @@ get_python_float_value(PyObject* dv, double* pnum)
         long v = PyLong_AsLong(dv);
         *pnum = (double)v;
     }
+#if PY_MAJOR_VERSION < 3
     else if (PyInt_Check(dv)) {
         long v = PyInt_AsLong(dv);
         *pnum = (double)v;
     }
     else if (PyString_Check(dv)) {
+#else
+    else if (PyUnicode_Check(dv)) {
+#endif
         /* Convert from string to int */
         double tid;
         char *endptr;
+#if PY_MAJOR_VERSION < 3
         char* p = PyString_AsString(dv);
+#else
+        char* p = PyUnicode_AsUTF8(dv);
+#endif
         tid = strtod(p, &endptr);
         if(endptr == p || *endptr)
             cc = -1;    /* Invalid format for double */
@@ -518,7 +559,11 @@ static PyObject* build_params_dict(cfg_t *pymodule)
             param = cfg_getnsec(pymodule, "param", k);
             name = apr_pstrdup(pool, param->title);
             value = apr_pstrdup(pool, cfg_getstr(param, "value"));
+#if PY_MAJOR_VERSION >= 3
+            pyvalue = PyUnicode_FromString(value);
+#else
             pyvalue = PyString_FromString(value);
+#endif
             if (name && pyvalue) {
                 PyDict_SetItemString(params_dict, name, pyvalue);
                 Py_DECREF(pyvalue);
@@ -539,6 +584,25 @@ static PyMethodDef GangliaMethods[] = {
      "Return the debug level used by ganglia."},
     {NULL, NULL, 0, NULL}
 };
+
+#if PY_MAJOR_VERSION >= 3
+static struct PyModuleDef GangliaModuledef = {
+    PyModuleDef_HEAD_INIT,
+    "ganglia",
+    NULL,
+    -1,
+    GangliaMethods,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+};
+
+PyMODINIT_FUNC
+PyInit_ganglia(void) {
+    return PyModule_Create(&GangliaModuledef);
+}
+#endif
 
 static int pyth_metric_init (apr_pool_t *p)
 {
@@ -583,11 +647,22 @@ static int pyth_metric_init (apr_pool_t *p)
     /* Init Python environment */
 
     /* Set up the python path to be able to load module from our module path */
+#if PY_MAJOR_VERSION >= 3
+    // Python 3.x
+    PyImport_AppendInittab("ganglia", PyInit_ganglia);
+    Py_Initialize();
+#else
+    // Python 2.x
     Py_Initialize();
     Py_InitModule("ganglia", GangliaMethods);
+#endif
 
     PyObject *sys_path = PySys_GetObject("path");
+#if PY_MAJOR_VERSION >= 3
+    PyObject *addpath = PyUnicode_FromString(path);
+#else
     PyObject *addpath = PyString_FromString(path);
+#endif
     PyList_Append(sys_path, addpath);
 
     PyEval_InitThreads();
